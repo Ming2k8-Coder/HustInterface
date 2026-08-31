@@ -1,0 +1,46 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.egg
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Environment variables & Credentials
+.env
+.env.local
+.env.*
+!.env.example
+
+# Local session cache & saved tokens
+session_cache.json
+.hust_session.json
+*.session.json
+.hust_interface/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright & Browsers
+.playwright/
+test-results/
+playwright-report/
+
+# Logs
+*.log
+logs/
+
+# IDE & Editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
