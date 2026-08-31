@@ -170,3 +170,12 @@ def register_ehust_tools(mcp):
             academic_warning_level=grades.academic_warning_level if grades else None
         )
         return overview.model_dump(mode="json")
+
+    @mcp.tool(
+        name="ehust_get_semesters",
+        description="Lấy danh sách tất cả các học kỳ học tập của ĐHBK Hà Nội từ API (mã kỳ, tên học kỳ, ngày bắt đầu/kết thúc, tuần học hiện tại, đợt mở đăng ký học phần, học kỳ hiện tại)."
+    )
+    async def get_semesters() -> List[Dict[str, Any]]:
+        semesters = await crawler.get_semesters()
+        return [s.model_dump(mode="json") for s in semesters]
+

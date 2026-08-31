@@ -22,6 +22,7 @@ from ..models.ehust_models import (
     CourseRegistrationPlanItem,
     GraduationEligibility,
     StudentOverview,
+    SemesterInfo,
 )
 
 
@@ -872,4 +873,64 @@ class EhustCrawler(BaseCrawler):
             missing_credits=missing,
             notes=notes
         )
+
+    async def get_semesters(self) -> List[SemesterInfo]:
+        """
+        Fetch all academic semesters configuration from HUST student API (https://student.hust.edu.vn/api/v1/semesters).
+        Provides real-time information on current semester, project semester, teaching weeks, and course enrollment periods.
+        """
+        async with self.get_http_client() as client:
+            res = await client.get("https://student.hust.edu.vn/api/v1/semesters")
+            if res.status_code != 200:
+                return []
+
+            data = res.json()
+            if not isinstance(data, list):
+                return []
+
+            def format_timestamp(ts: Optional[int]) -> Optional[str]:
+                if ts and ts > 0:
+                    try:
+                        return datetime.fromtimestamp(ts / 1000.0).strftime("%Y-%m-%d")
+                    except Exception:
+                        return None
+                return None
+
+            semesters: List[SemesterInfo] = []
+            for item in data:
+                raw_id = str(item.get("id") or item.get("semester") or "")
+                if not raw_id:
+                    continue
+
+                # Format human readable name (e.g. 20261 -> "Học kỳ 2026.1", 20253 -> "Học kỳ Hè 2025.3")
+                year_part = raw_id[:4] if len(raw_id) >= 4 else raw_id
+                sem_part = raw_id[4:] if len(raw_id) > 4 else ""
+                if sem_part == "3":
+                    name = f"Học kỳ Hè {year_part}.3"
+                elif sem_part:
+                    name = f"Học kỳ {year_part}.{sem_part}"
+                else:
+                    name = f"Học kỳ {raw_id}"
+
+                is_curr = bool(item.get("isCurrentForClass") or item.get("currentForClass"))
+                is_next = bool(item.get("isNextForProject") or item.get("nextForProject"))
+
+                semesters.append(
+                    SemesterInfo(
+                        id=raw_id,
+                        semester_name=name,
+                        is_current=is_curr,
+                        is_next=is_next,
+                        start_date=format_timestamp(item.get("startDate")),
+                        end_date=format_timestamp(item.get("endDate")),
+                        current_week=item.get("currentWeek") if item.get("currentWeek", 0) > 0 else None,
+                        start_week=item.get("startWeek") if item.get("startWeek", 0) > 0 else None,
+                        start_enroll_date=format_timestamp(item.get("startEnroll")),
+                        end_enroll_date=format_timestamp(item.get("endEnroll")),
+                        can_enroll=bool(item.get("_canEnroll", False))
+                    )
+                )
+
+            return semesters
+
 

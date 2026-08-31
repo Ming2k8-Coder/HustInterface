@@ -172,3 +172,18 @@ class StudentOverview(BaseModel):
     upcoming_exams_count: int = 0
     upcoming_deadlines_count: int = 0
     academic_warning_level: Optional[str] = None
+
+
+class SemesterInfo(BaseModel):
+    id: str = Field(..., description="Mã học kỳ (ví dụ: '20261', '20252', '20241')")
+    semester_name: str = Field(..., description="Tên định dạng học kỳ (ví dụ: 'Học kỳ 2026.1')")
+    is_current: bool = Field(default=False, description="Học kỳ hiện tại đang diễn ra")
+    is_next: bool = Field(default=False, description="Học kỳ tiếp theo sắp mở đăng ký / đồ án")
+    start_date: Optional[str] = Field(default=None, description="Ngày bắt đầu học kỳ (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(default=None, description="Ngày kết thúc học kỳ (YYYY-MM-DD)")
+    current_week: Optional[int] = Field(default=None, description="Tuần học hiện tại trong kỳ")
+    start_week: Optional[int] = Field(default=None, description="Tuần bắt đầu")
+    start_enroll_date: Optional[str] = Field(default=None, description="Thời gian bắt đầu đăng ký lớp")
+    end_enroll_date: Optional[str] = Field(default=None, description="Thời gian kết thúc đăng ký lớp")
+    can_enroll: bool = Field(default=False, description="Có đang trong đợt đăng ký lớp không")
+
