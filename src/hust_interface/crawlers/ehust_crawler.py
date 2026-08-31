@@ -215,31 +215,39 @@ class EhustCrawler(BaseCrawler):
                 except Exception:
                     pass
 
-            if not soup or not soup.find("table"):
+            if not soup or not (soup.find("table") or soup.find(class_=re.compile(r"ant-table"))):
                 soup = await client.get_soup("/Schedule/StudentSchedule", params={"semester": semester, "week": 1})
 
             classes: List[ScheduleClassItem] = []
-            table = soup.find("table", {"id": "tblStudentSchedule"}) or soup.find("table")
+            # Find table inside .ant-table-body or standard table
+            ant_body = soup.find(class_=re.compile(r"ant-table-(body|content)")) if soup else None
+            table = (ant_body.find("table") if ant_body else None) or (soup.find("table", {"id": "tblStudentSchedule"}) if soup else None) or (soup.find("table") if soup else None)
+            
             if table:
-                rows = table.find_all("tr")[1:]
+                tbody = table.find("tbody") or table
+                rows = tbody.find_all("tr")
                 for r in rows:
-                    cols = r.find_all("td")
+                    cols = r.find_all(["td", "th"])
+                    if not cols or r.find_parent("thead"):
+                        continue
                     if len(cols) >= 9:
                         # e.hust.edu.vn timetable format: ["STT", "Học phần", "Hình thức giảng dạy", "Điểm", "Lịch học", "Vắng", "Giảng viên", "Trạng thái thi", "Phản hồi"]
+                        stt = cols[0].get_text(strip=True)
                         raw_course = cols[1].get_text(separator=" ", strip=True)
                         cid_match = re.search(r"([A-Z]{2,4}\d{4})", raw_course)
                         cid = cid_match.group(1) if cid_match else raw_course
-                        cname = raw_course.replace(cid, "").strip(" -:") if cid_match else raw_course
+                        cname = raw_course.replace(cid, "").strip(" -:\n\t") if cid_match else raw_course
 
                         # Check for class ID (e.g. 768430 or 172153)
                         uid_match = re.search(r"(\d{5,7})", raw_course)
                         class_id = uid_match.group(1) if uid_match else cid
 
                         teaching_type = cols[2].get_text(strip=True)
+                        grade_col = cols[3].get_text(strip=True) if len(cols) > 3 else None
                         schedule_txt = cols[4].get_text(separator=" ", strip=True)
                         absence_str = re.sub(r"[^\d]", "", cols[5].get_text(strip=True))
                         absence_cnt = int(absence_str) if absence_str else 0
-                        gv = cols[6].get_text(strip=True)
+                        gv = cols[6].get_text(separator=" ", strip=True)
                         exam_st = cols[7].get_text(strip=True)
                         feedback = cols[8].get_text(strip=True) if len(cols) > 8 else None
 
@@ -253,9 +261,9 @@ class EhustCrawler(BaseCrawler):
                                 day_name="Theo lịch",
                                 time_range=schedule_txt or "Xem chi tiết",
                                 room="Giảng đường",
-                                lecturer=gv,
+                                lecturer=gv or "Chưa phân công",
                                 absence_count=absence_cnt,
-                                exam_status=exam_st,
+                                exam_status=exam_st or "Đủ điều kiện",
                                 student_feedback=feedback
                             )
                         )
@@ -263,6 +271,7 @@ class EhustCrawler(BaseCrawler):
                         course_id = cols[0].get_text(strip=True)
                         course_name = cols[1].get_text(strip=True)
                         class_id = cols[2].get_text(strip=True)
+
                         day_str = cols[3].get_text(strip=True)
                         time_str = cols[4].get_text(strip=True)
                         room = cols[5].get_text(strip=True)
