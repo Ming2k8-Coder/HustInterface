@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "hust-interface": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "E:\\Master_Project\\Coder_projext\\HustInterface",
+        "run",
+        "hust-mcp",
+        "run"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
