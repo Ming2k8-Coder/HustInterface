@@ -98,11 +98,32 @@ class EhustCrawler(BaseCrawler):
                 cohort=cohort
             )
 
-    async def get_schedule(self, semester: str = "2024.1", week: int = 1) -> WeeklySchedule:
+    async def get_current_active_semester(self) -> str:
+        """
+        Helper method to retrieve the currently active academic semester ID (e.g. '2026.1' or '2024.1').
+        """
+        try:
+            semesters = await self.get_semesters()
+            for s in semesters:
+                if s.is_current:
+                    # Convert '20261' to '2026.1' if necessary
+                    sid = s.id
+                    if len(sid) == 5 and sid[4] in ("1", "2", "3"):
+                        return f"{sid[:4]}.{sid[4]}"
+                    return sid
+        except Exception as e:
+            logger.warning(f"Could not auto-resolve active semester: {e}")
+        return "2024.1"
+
+    async def get_schedule(self, semester: Optional[str] = None, week: int = 1) -> WeeklySchedule:
         """
         Extract weekly class schedule from QLĐT (/Schedule/StudentSchedule) or eHUST (/students/learn/timetable).
+        If semester is not specified, automatically fetches the currently active semester.
         """
         self.require_auth()
+        if not semester:
+            semester = await self.get_current_active_semester()
+
         async with self.get_http_client() as client:
             # 1. Try QLĐT / eHUST timetable URL
             params = {"semester": semester, "week": week}
@@ -113,6 +134,7 @@ class EhustCrawler(BaseCrawler):
                     try:
                         soup = await ehust_client.get_soup("/students/learn/timetable")
                     except Exception:
+
                         pass
 
             classes: List[ScheduleClassItem] = []
@@ -200,17 +222,22 @@ class EhustCrawler(BaseCrawler):
                 classes=classes
             )
 
-    async def get_full_semester_schedule(self, semester: str = "2024.1") -> FullSemesterSchedule:
+    async def get_full_semester_schedule(self, semester: Optional[str] = None) -> FullSemesterSchedule:
         """
         Extract full semester class schedule containing all enrolled courses and their full schedule across all weeks.
         Combines and aggregates classes from eHUST timetable and QLĐT.
+        If semester is not provided, automatically uses the currently active semester.
         """
         self.require_auth()
+        if not semester:
+            semester = await self.get_current_active_semester()
+
         async with self.get_http_client() as client:
             soup = None
             # 1. Try eHUST portal /students/learn/timetable (provides all enrolled subjects and schedules)
             async with AsyncHustHttpClient(base_url=settings.EHUST_BASE_URL) as ehust_client:
                 try:
+
                     soup = await ehust_client.get_soup("/students/learn/timetable")
                 except Exception:
                     pass
@@ -234,6 +261,9 @@ class EhustCrawler(BaseCrawler):
                         # e.hust.edu.vn timetable format: ["STT", "Học phần", "Hình thức giảng dạy", "Điểm", "Lịch học", "Vắng", "Giảng viên", "Trạng thái thi", "Phản hồi"]
                         stt = cols[0].get_text(strip=True)
                         raw_course = cols[1].get_text(separator=" ", strip=True)
+                        # Skip empty rows (e.g. empty table state with blank td)
+                        if not raw_course and not any(c.get_text(strip=True) for c in cols):
+                            continue
                         cid_match = re.search(r"([A-Z]{2,4}\d{4})", raw_course)
                         cid = cid_match.group(1) if cid_match else raw_course
                         cname = raw_course.replace(cid, "").strip(" -:\n\t") if cid_match else raw_course
@@ -251,22 +281,24 @@ class EhustCrawler(BaseCrawler):
                         exam_st = cols[7].get_text(strip=True)
                         feedback = cols[8].get_text(strip=True) if len(cols) > 8 else None
 
-                        classes.append(
-                            ScheduleClassItem(
-                                course_id=cid,
-                                course_name=cname or cid,
-                                class_id=class_id,
-                                teaching_type=teaching_type,
-                                day_of_week=2,
-                                day_name="Theo lịch",
-                                time_range=schedule_txt or "Xem chi tiết",
-                                room="Giảng đường",
-                                lecturer=gv or "Chưa phân công",
-                                absence_count=absence_cnt,
-                                exam_status=exam_st or "Đủ điều kiện",
-                                student_feedback=feedback
+                        if cid or cname or schedule_txt:
+                            classes.append(
+                                ScheduleClassItem(
+                                    course_id=cid or "N/A",
+                                    course_name=cname or cid or "N/A",
+                                    class_id=class_id or "N/A",
+                                    teaching_type=teaching_type or "Trực tiếp",
+                                    day_of_week=2,
+                                    day_name="Theo lịch",
+                                    time_range=schedule_txt or "Xem chi tiết",
+                                    room="Giảng đường",
+                                    lecturer=gv or "Chưa phân công",
+                                    absence_count=absence_cnt,
+                                    exam_status=exam_st or "Đủ điều kiện",
+                                    student_feedback=feedback
+                                )
                             )
-                        )
+
                     elif len(cols) >= 7:
                         course_id = cols[0].get_text(strip=True)
                         course_name = cols[1].get_text(strip=True)

@@ -23,19 +23,20 @@ def register_ehust_tools(mcp):
 
     @mcp.tool(
         name="ehust_get_schedule",
-        description="Lấy thời khóa biểu học tập theo học kỳ và tuần học cụ thể (ví dụ: semester='2024.1', week=3). Bao gồm môn học, phòng học, giảng viên, khung giờ."
+        description="Lấy thời khóa biểu học tập theo học kỳ và tuần học cụ thể (ví dụ: week=1). Nếu không truyền semester, hệ thống sẽ tự động lấy theo học kỳ đang active hiện tại."
     )
-    async def get_schedule(semester: str = "2024.1", week: int = 1) -> Dict[str, Any]:
+    async def get_schedule(semester: Optional[str] = None, week: int = 1) -> Dict[str, Any]:
         schedule = await crawler.get_schedule(semester=semester, week=week)
         return schedule.model_dump(mode="json")
 
     @mcp.tool(
         name="ehust_get_full_semester_schedule",
-        description="Lấy toàn bộ lịch học và tất cả các môn học đã đăng ký trong suốt học kỳ (gồm thông tin tất cả các tuần, ca học, phòng học, giảng viên, điểm danh vắng)."
+        description="Lấy toàn bộ lịch học và tất cả các môn học đã đăng ký trong suốt học kỳ (gồm thông tin tất cả các tuần, ca học, phòng học, giảng viên, điểm danh vắng). Nếu không truyền semester, hệ thống tự động lấy theo học kỳ đang active hiện tại."
     )
-    async def get_full_semester_schedule(semester: str = "2024.1") -> Dict[str, Any]:
+    async def get_full_semester_schedule(semester: Optional[str] = None) -> Dict[str, Any]:
         schedule = await crawler.get_full_semester_schedule(semester=semester)
         return schedule.model_dump(mode="json")
+
 
 
     @mcp.tool(
