@@ -270,16 +270,20 @@ class EhustCrawler(BaseCrawler):
             semester = await self.get_current_active_semester()
 
         classes: List[ScheduleClassItem] = []
+        soup = None
         sess = self.get_session()
-        token = sess.cookies.get("token") if sess and sess.cookies else None
+
+        cookies = sess.cookies if sess and sess.cookies else {}
+        token = cookies.get("token") or cookies.get("x-access-token") or cookies.get("x-student-portal-token")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
 
         # 1. Query official encrypted student-classes API (https://student.hust.edu.vn/api/v2/timetables/student-classes)
         try:
             from ..core.crypto_helper import TimetableCryptoHelper
-            enc_payload = TimetableCryptoHelper.encrypt_payload({"semester": str(semester)})
+            clean_sem = str(semester).replace(".", "")
+            enc_payload = TimetableCryptoHelper.encrypt_payload({"semester": clean_sem})
             
-            async with AsyncHustHttpClient(base_url="https://student.hust.edu.vn", default_headers=headers) as api_client:
+            async with AsyncHustHttpClient(base_url="https://student.hust.edu.vn", default_headers=headers, default_cookies=cookies) as api_client:
                 res = await api_client.get(f"/api/v2/timetables/student-classes?payload={enc_payload}")
                 if res.status_code == 200:
                     data = res.json()
@@ -288,6 +292,7 @@ class EhustCrawler(BaseCrawler):
                         raw_items = TimetableCryptoHelper.decrypt_payload(data["payload"])
                     elif isinstance(data, list):
                         raw_items = data
+
 
                     for item in raw_items:
                         c_code = item.get("courseId") or item.get("courseCode") or ""
@@ -299,11 +304,7 @@ class EhustCrawler(BaseCrawler):
                         time_places = item.get("timePlaces", [])
                         cal_info = item.get("calendarInfo", "")
                         
-                        time_str = "Chưa xếp lịch"
-                        room_str = "Giảng đường"
-                        weeks_list = []
-                        day_of_week = 2
-
+                        # Format human-friendly schedule description
                         if time_places and isinstance(time_places, list) and len(time_places) > 0:
                             tp = time_places[0]
                             day_of_week = int(tp.get("day", 2))
@@ -311,9 +312,21 @@ class EhustCrawler(BaseCrawler):
                             weeks_list = tp.get("weeks", [])
                             f_time = tp.get("from", "")
                             t_time = tp.get("to", "")
-                            time_str = f"Thứ {day_of_week} Tiết {f_time}-{t_time} [{room_str}]"
+                            weeks_txt = f"{weeks_list[0]}-{weeks_list[-1]}" if weeks_list else "3-19"
+                            time_str = f"Thứ {day_of_week}, Tiết {f_time}-{t_time} (Tuần {weeks_txt}) [{room_str}]"
                         elif cal_info:
-                            time_str = cal_info
+                            # e.g. "1,524,526,3-19,D5-101;"
+                            parts = [p.strip() for p in cal_info.split(";") if p.strip()]
+                            cal_summaries = []
+                            for p in parts:
+                                sub = p.split(",")
+                                if len(sub) >= 5:
+                                    w_range = sub[3]
+                                    r_name = sub[4]
+                                    room_str = r_name
+                                    cal_summaries.append(f"Tuần {w_range} [{r_name}]")
+                            time_str = ", ".join(cal_summaries) if cal_summaries else cal_info
+
 
                         classes.append(
                             ScheduleClassItem(
