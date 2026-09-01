@@ -1,7 +1,6 @@
 from typing import Optional, Dict, Any
 from ..core.session_manager import session_manager
 from ..auth.manual_auth import ManualAuthenticator
-from ..auth.sso_authenticator import HustSSOAuthenticator
 
 
 def register_auth_tools(mcp):
@@ -36,19 +35,20 @@ def register_auth_tools(mcp):
 
     @mcp.tool(
         name="hust_login_sso",
-        description="Tự động đăng nhập qua HUST Microsoft SSO bằng Playwright Headless Browser và lưu token/cookie vào cache."
+        description="Tự động đăng nhập trực tiếp các cổng HUST (eHUST, iCTSV) qua Direct HTTP API/Form POST và lưu token/cookie vào cache."
     )
     async def login_sso(
         email: Optional[str] = None,
-        password: Optional[str] = None,
-        headless: bool = True
+        password: Optional[str] = None
     ) -> Dict[str, Any]:
-        authenticator = HustSSOAuthenticator(email=email, password=password, headless=headless)
-        results = await authenticator.login_all()
+        from ..auth.direct_http_auth import DirectHttpAuthenticator
+        authenticator = DirectHttpAuthenticator(email=email, password=password)
+        results = await authenticator.login_all_direct()
         return {
             "results": results,
             "summary": session_manager.get_auth_summary()
         }
+
 
     @mcp.tool(
         name="hust_reauthenticate",

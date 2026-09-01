@@ -18,8 +18,8 @@ from .config import settings
 from .core.session_manager import session_manager
 from .auth.manual_auth import ManualAuthenticator
 from .auth.direct_http_auth import DirectHttpAuthenticator
-from .auth.sso_authenticator import HustDirectAuthenticator
 from .server import mcp_server
+
 
 console = Console(safe_box=True)
 
