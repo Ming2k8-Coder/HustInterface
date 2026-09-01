@@ -269,127 +269,128 @@ class EhustCrawler(BaseCrawler):
         if not semester:
             semester = await self.get_current_active_semester()
 
-        async with self.get_http_client() as client:
-            soup = None
-            # 1. Try direct HTTP GET from eHUST timetable
-            async with AsyncHustHttpClient(base_url=settings.EHUST_BASE_URL) as ehust_client:
-                try:
-                    soup = await ehust_client.get_soup("/students/learn/timetable")
-                except Exception:
-                    pass
+        classes: List[ScheduleClassItem] = []
+        sess = self.get_session()
+        token = sess.cookies.get("token") if sess and sess.cookies else None
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-            # 2. Check if table rows exist in static HTML, if not, use automated browser rendering (Next.js CSR page)
-            has_client_rows = False
-            if soup:
-                tbody = soup.find("tbody")
-                if tbody and tbody.find_all("tr", class_=re.compile(r"ant-table-row")):
-                    has_client_rows = True
-
-            classes: List[ScheduleClassItem] = []
-
-            if not has_client_rows:
-                # Use browser to render React / Next.js client-side table
-                try:
-                    from playwright.async_api import async_playwright
-                    sess = self.get_session()
-                    cookies_list = []
-                    if sess and sess.cookies:
-                        for k, v in sess.cookies.items():
-                            cookies_list.append({"name": k, "value": v, "domain": ".hust.edu.vn", "path": "/"})
-
-                    async with async_playwright() as p:
-                        browser = await p.chromium.launch(headless=True)
-                        context = await browser.new_context(user_agent=settings.USER_AGENT)
-                        if cookies_list:
-                            await context.add_cookies(cookies_list)
-                        page = await context.new_page()
-                        await page.goto("https://e.hust.edu.vn/students/learn/timetable", wait_until="networkidle", timeout=20000)
-                        
-                        # Ensure 'Chi tiết' is selected
-                        detail_btn = page.locator('text="Chi tiết"').first
-                        if await detail_btn.count() > 0:
-                            await detail_btn.click()
-                            await page.wait_for_timeout(2000)
-
-                        html = await page.content()
-                        soup = BeautifulSoup(html, "html.parser")
-                        await browser.close()
-                except Exception as e:
-                    logger.warning(f"Browser rendering fallback failed: {e}")
-
-            # Parse extracted table rows from soup
-            if soup:
-                tbody = soup.find("tbody") or soup
-                rows = tbody.find_all("tr", class_=re.compile(r"ant-table-row")) or tbody.find_all("tr")
-                for r in rows:
-                    cols = r.find_all(["td", "th"])
-                    if not cols or r.find_parent("thead"):
-                        continue
-                    if len(cols) >= 6:
-                        # e.hust.edu.vn timetable format: [STT, Học phần, Hình thức, Điểm, Lịch học, Vắng, Giảng viên, ...]
-                        raw_course = cols[1].get_text(separator="\n", strip=True)
-                        if not raw_course or "Không có lịch học" in raw_course:
-                            continue
-                        
-                        lines = [line.strip() for line in raw_course.split("\n") if line.strip()]
-                        cname = lines[0] if lines else ""
-                        second_line = lines[1] if len(lines) > 1 else ""
-
-                        cid_match = re.search(r"([A-Z]{2,4}\d{4})", second_line or raw_course)
-                        cid = cid_match.group(1) if cid_match else raw_course
-                        uid_match = re.search(r"(\d{5,7})", second_line or raw_course)
-                        class_id = uid_match.group(1) if uid_match else cid
-
-                        teaching_type = cols[2].get_text(strip=True) if len(cols) > 2 else "Offline"
-                        schedule_txt = cols[4].get_text(separator=" | ", strip=True) if len(cols) > 4 else ""
-                        absence_str = re.sub(r"[^\d]", "", cols[5].get_text(strip=True)) if len(cols) > 5 else "0"
-                        absence_cnt = int(absence_str) if absence_str else 0
-                        gv = cols[6].get_text(separator=" ", strip=True) if len(cols) > 6 else ""
-                        exam_st = cols[7].get_text(strip=True) if len(cols) > 7 else None
-                        feedback = cols[8].get_text(strip=True) if len(cols) > 8 else None
-
-                        # Extract day of week from schedule string (e.g. "Chiều T5, Tuần: 3-19" -> 5)
-                        day_of_week = 2
-                        day_match = re.search(r"T([2-7])", schedule_txt)
-                        if day_match:
-                            day_of_week = int(day_match.group(1))
-                        elif "CN" in schedule_txt or "Chủ Nhật" in schedule_txt:
-                            day_of_week = 8
-
-                        # Extract room (e.g. "D5-101" or "TC-401")
-                        room_match = re.search(r"([A-Z]\d+-\d+|TC-\d+)", schedule_txt)
-                        room_val = room_match.group(1) if room_match else "Giảng đường"
-
-                        # Extract weeks (e.g. "3-19" -> [3, 4, ..., 19])
-                        weeks_match = re.search(r"Tuần:\s*(\d+)\s*-\s*(\d+)", schedule_txt)
-                        weeks_list = []
-                        if weeks_match:
-                            start_w, end_w = int(weeks_match.group(1)), int(weeks_match.group(2))
-                            weeks_list = list(range(start_w, end_w + 1))
+        # 1. Query direct student classes REST API (https://student.hust.edu.vn/api/v1/student-class)
+        try:
+            async with AsyncHustHttpClient(base_url="https://student.hust.edu.vn", default_headers=headers) as api_client:
+                res = await api_client.get("/api/v1/student-class")
+                if res.status_code == 200:
+                    data = res.json()
+                    raw_items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                    for item in raw_items:
+                        c_code = item.get("courseCode") or item.get("course_id") or item.get("subjectCode") or ""
+                        c_name = item.get("courseName") or item.get("name") or item.get("subjectName") or c_code
+                        class_id = str(item.get("classCode") or item.get("class_id") or item.get("id") or "")
+                        t_type = item.get("teachingType") or item.get("type") or "Offline"
+                        time_info = item.get("schedule") or item.get("time") or item.get("time_range") or "Theo lịch"
+                        room_name = item.get("room") or item.get("roomName") or "Giảng đường"
+                        absence = item.get("absenceCount") or item.get("absent") or 0
 
                         classes.append(
                             ScheduleClassItem(
-                                course_id=cid,
-                                course_name=cname or cid,
+                                course_id=c_code,
+                                course_name=c_name,
                                 class_id=class_id,
-                                teaching_type=teaching_type or "Offline",
-                                day_of_week=day_of_week,
-                                day_name=f"Thứ {day_of_week}" if day_of_week < 8 else "Chủ Nhật",
-                                time_range=schedule_txt or "Chưa xếp lịch",
-                                room=room_val,
-                                weeks=weeks_list,
-                                lecturer=gv or "Chưa phân công",
-                                absence_count=absence_cnt,
-                                exam_status=exam_st or "Đủ điều kiện",
-                                student_feedback=feedback
+                                teaching_type=t_type,
+                                day_of_week=2,
+                                day_name="Theo lịch",
+                                time_range=str(time_info),
+                                room=str(room_name),
+                                lecturer=item.get("lecturerName") or "Chưa phân công",
+                                absence_count=int(absence) if str(absence).isdigit() else 0,
+                                exam_status="Đủ điều kiện"
                             )
                         )
+        except Exception as e:
+            logger.debug(f"Direct student-class API fetch error: {e}")
 
-            return FullSemesterSchedule(
-                semester=semester,
-                total_courses=len(classes),
-                classes=classes
-            )
+        # 2. Fallback to static HTML parse if API yielded empty
+        if not classes:
+            try:
+                async with AsyncHustHttpClient(base_url=settings.EHUST_BASE_URL) as ehust_client:
+                    soup = await ehust_client.get_soup("/students/learn/timetable")
+            except Exception:
+                soup = None
+
+
+        # Parse extracted table rows from soup
+        if soup:
+            tbody = soup.find("tbody") or soup
+            rows = tbody.find_all("tr", class_=re.compile(r"ant-table-row")) or tbody.find_all("tr")
+            for r in rows:
+                cols = r.find_all(["td", "th"])
+                if not cols or r.find_parent("thead"):
+                    continue
+                if len(cols) >= 6:
+                    # e.hust.edu.vn timetable format: [STT, Học phần, Hình thức, Điểm, Lịch học, Vắng, Giảng viên, ...]
+                    raw_course = cols[1].get_text(separator="\n", strip=True)
+                    if not raw_course or "Không có lịch học" in raw_course:
+                        continue
+                    
+                    lines = [line.strip() for line in raw_course.split("\n") if line.strip()]
+                    cname = lines[0] if lines else ""
+                    second_line = lines[1] if len(lines) > 1 else ""
+
+                    cid_match = re.search(r"([A-Z]{2,4}\d{4})", second_line or raw_course)
+                    cid = cid_match.group(1) if cid_match else raw_course
+                    uid_match = re.search(r"(\d{5,7})", second_line or raw_course)
+                    class_id = uid_match.group(1) if uid_match else cid
+
+                    teaching_type = cols[2].get_text(strip=True) if len(cols) > 2 else "Offline"
+                    schedule_txt = cols[4].get_text(separator=" | ", strip=True) if len(cols) > 4 else ""
+                    absence_str = re.sub(r"[^\d]", "", cols[5].get_text(strip=True)) if len(cols) > 5 else "0"
+                    absence_cnt = int(absence_str) if absence_str else 0
+                    gv = cols[6].get_text(separator=" ", strip=True) if len(cols) > 6 else ""
+                    exam_st = cols[7].get_text(strip=True) if len(cols) > 7 else None
+                    feedback = cols[8].get_text(strip=True) if len(cols) > 8 else None
+
+                    # Extract day of week from schedule string (e.g. "Chiều T5, Tuần: 3-19" -> 5)
+                    day_of_week = 2
+                    day_match = re.search(r"T([2-7])", schedule_txt)
+                    if day_match:
+                        day_of_week = int(day_match.group(1))
+                    elif "CN" in schedule_txt or "Chủ Nhật" in schedule_txt:
+                        day_of_week = 8
+
+                    # Extract room (e.g. "D5-101" or "TC-401")
+                    room_match = re.search(r"([A-Z]\d+-\d+|TC-\d+)", schedule_txt)
+                    room_val = room_match.group(1) if room_match else "Giảng đường"
+
+                    # Extract weeks (e.g. "3-19" -> [3, 4, ..., 19])
+                    weeks_match = re.search(r"Tuần:\s*(\d+)\s*-\s*(\d+)", schedule_txt)
+                    weeks_list = []
+                    if weeks_match:
+                        start_w, end_w = int(weeks_match.group(1)), int(weeks_match.group(2))
+                        weeks_list = list(range(start_w, end_w + 1))
+
+                    classes.append(
+                        ScheduleClassItem(
+                            course_id=cid,
+                            course_name=cname or cid,
+                            class_id=class_id,
+                            teaching_type=teaching_type or "Offline",
+                            day_of_week=day_of_week,
+                            day_name=f"Thứ {day_of_week}" if day_of_week < 8 else "Chủ Nhật",
+                            time_range=schedule_txt or "Chưa xếp lịch",
+                            room=room_val,
+                            weeks=weeks_list,
+                            lecturer=gv or "Chưa phân công",
+                            absence_count=absence_cnt,
+                            exam_status=exam_st or "Đủ điều kiện",
+                            student_feedback=feedback
+                        )
+                    )
+
+        return FullSemesterSchedule(
+            semester=semester,
+            total_courses=len(classes),
+            classes=classes
+        )
+
 
 
     async def get_grades(self, semester: Optional[str] = None) -> SemesterGradeSummary:

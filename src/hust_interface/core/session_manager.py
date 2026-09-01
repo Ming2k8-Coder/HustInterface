@@ -40,6 +40,13 @@ class SessionManager:
             logger.error(f"Failed to save session cache: {e}")
 
     def get_service_session(self, service_name: str) -> Optional[ServiceSessionData]:
+        # Always reload from file if file exists to prevent stale cache in multi-process/test environments
+        if self.storage_path.exists():
+            try:
+                self.cache = self._load_cache()
+            except Exception:
+                pass
+
         # Check explicit env override first
         if service_name == "ictsv" and settings.ICTSV_TOKEN:
             return ServiceSessionData(

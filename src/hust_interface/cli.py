@@ -116,6 +116,37 @@ def login_ctsv_cmd(token: Optional[str]):
     ManualAuthenticator.set_ictsv_token(token)
     console.print("[bold green]✓ Đã lưu Token CTSV thành công vào session cache![/bold green]")
 
+@cli.command(name="schedule")
+@click.option("--semester", "-s", default=None, help="Mã học kỳ (mặc định: học kỳ active hiện tại)")
+def schedule_cmd(semester: Optional[str]):
+    """Xem toàn bộ thời khóa biểu học kỳ hiện tại hoặc học kỳ chỉ định."""
+    from .crawlers.ehust_crawler import EhustCrawler
+    crawler = EhustCrawler()
+    
+    with console.status("[bold cyan]Đang tải thời khóa biểu...[/bold cyan]"):
+        res = asyncio.run(crawler.get_full_semester_schedule(semester=semester))
+        
+    table = Table(title=f"THỜI KHÓA BIỂU HỌC KỲ {res.semester} ({res.total_courses} môn)", show_header=True, header_style="bold magenta")
+    table.add_column("STT", justify="center", style="cyan")
+    table.add_column("Mã Lớp", style="yellow")
+    table.add_column("Mã HP", style="green")
+    table.add_column("Tên học phần", style="bold white")
+    table.add_column("Hình thức", style="blue")
+    table.add_column("Lịch học & Phòng", style="white")
+    table.add_column("Vắng", justify="center", style="red")
+
+    for idx, c in enumerate(res.classes, 1):
+        table.add_row(
+            str(idx),
+            str(c.class_id),
+            str(c.course_id),
+            str(c.course_name),
+            str(c.teaching_type),
+            str(c.time_range),
+            str(c.absence_count)
+        )
+
+    console.print(table)
 
 
 
