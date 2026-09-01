@@ -274,21 +274,46 @@ class EhustCrawler(BaseCrawler):
         token = sess.cookies.get("token") if sess and sess.cookies else None
         headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-        # 1. Query direct student classes REST API (https://student.hust.edu.vn/api/v1/student-class)
+        # 1. Query official encrypted student-classes API (https://student.hust.edu.vn/api/v2/timetables/student-classes)
         try:
+            from ..core.crypto_helper import TimetableCryptoHelper
+            enc_payload = TimetableCryptoHelper.encrypt_payload({"semester": str(semester)})
+            
             async with AsyncHustHttpClient(base_url="https://student.hust.edu.vn", default_headers=headers) as api_client:
-                res = await api_client.get("/api/v1/student-class")
+                res = await api_client.get(f"/api/v2/timetables/student-classes?payload={enc_payload}")
                 if res.status_code == 200:
                     data = res.json()
-                    raw_items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                    raw_items = []
+                    if isinstance(data, dict) and "payload" in data:
+                        raw_items = TimetableCryptoHelper.decrypt_payload(data["payload"])
+                    elif isinstance(data, list):
+                        raw_items = data
+
                     for item in raw_items:
-                        c_code = item.get("courseCode") or item.get("course_id") or item.get("subjectCode") or ""
-                        c_name = item.get("courseName") or item.get("name") or item.get("subjectName") or c_code
-                        class_id = str(item.get("classCode") or item.get("class_id") or item.get("id") or "")
-                        t_type = item.get("teachingType") or item.get("type") or "Offline"
-                        time_info = item.get("schedule") or item.get("time") or item.get("time_range") or "Theo lịch"
-                        room_name = item.get("room") or item.get("roomName") or "Giảng đường"
-                        absence = item.get("absenceCount") or item.get("absent") or 0
+                        c_code = item.get("courseId") or item.get("courseCode") or ""
+                        c_name = item.get("courseName") or c_code
+                        class_id = str(item.get("classId") or item.get("classCode") or "")
+                        t_type = item.get("classType") or item.get("teachingType") or "Offline"
+                        
+                        # Extract schedule details from timePlaces or calendarInfo
+                        time_places = item.get("timePlaces", [])
+                        cal_info = item.get("calendarInfo", "")
+                        
+                        time_str = "Chưa xếp lịch"
+                        room_str = "Giảng đường"
+                        weeks_list = []
+                        day_of_week = 2
+
+                        if time_places and isinstance(time_places, list) and len(time_places) > 0:
+                            tp = time_places[0]
+                            day_of_week = int(tp.get("day", 2))
+                            room_str = str(tp.get("place", "Giảng đường"))
+                            weeks_list = tp.get("weeks", [])
+                            f_time = tp.get("from", "")
+                            t_time = tp.get("to", "")
+                            time_str = f"Thứ {day_of_week} Tiết {f_time}-{t_time} [{room_str}]"
+                        elif cal_info:
+                            time_str = cal_info
 
                         classes.append(
                             ScheduleClassItem(
@@ -296,17 +321,18 @@ class EhustCrawler(BaseCrawler):
                                 course_name=c_name,
                                 class_id=class_id,
                                 teaching_type=t_type,
-                                day_of_week=2,
-                                day_name="Theo lịch",
-                                time_range=str(time_info),
-                                room=str(room_name),
+                                day_of_week=day_of_week,
+                                day_name=f"Thứ {day_of_week}" if day_of_week < 8 else "Chủ Nhật",
+                                time_range=time_str,
+                                room=room_str,
+                                weeks=weeks_list,
                                 lecturer=item.get("lecturerName") or "Chưa phân công",
-                                absence_count=int(absence) if str(absence).isdigit() else 0,
+                                absence_count=0,
                                 exam_status="Đủ điều kiện"
                             )
                         )
         except Exception as e:
-            logger.debug(f"Direct student-class API fetch error: {e}")
+            logger.warning(f"Encrypted student-classes API fetch error: {e}")
 
         # 2. Fallback to static HTML parse if API yielded empty
         if not classes:
@@ -315,6 +341,7 @@ class EhustCrawler(BaseCrawler):
                     soup = await ehust_client.get_soup("/students/learn/timetable")
             except Exception:
                 soup = None
+
 
 
         # Parse extracted table rows from soup
