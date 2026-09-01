@@ -139,6 +139,7 @@ class EhustCrawler(BaseCrawler):
         """
         Helper method to retrieve the currently active academic semester ID (e.g. '2026.1' or '2024.1').
         """
+        # 1. Fast check if semester is present in cached session or profile
         try:
             semesters = await self.get_semesters()
             for s in semesters:
@@ -149,8 +150,9 @@ class EhustCrawler(BaseCrawler):
                         return f"{sid[:4]}.{sid[4]}"
                     return sid
         except Exception as e:
-            logger.warning(f"Could not auto-resolve active semester: {e}")
-        return "2024.1"
+            logger.debug(f"Could not auto-resolve active semester: {e}")
+        return "2026.1"
+
 
     async def get_schedule(self, semester: Optional[str] = None, week: int = 1) -> WeeklySchedule:
         """
@@ -723,8 +725,8 @@ class EhustCrawler(BaseCrawler):
                     )
 
                 # Textbooks (Giáo trình chính)
+                import json
                 textbooks: List[TextbookItem] = []
-                # Check JSON string list in 'textBooks' first for docUrls/link attachments
                 raw_tb_list = api_data.get("textBooks") or []
                 parsed_tb_list = []
                 for item in raw_tb_list:
@@ -732,12 +734,13 @@ class EhustCrawler(BaseCrawler):
                         try:
                             parsed_tb_list.append(json.loads(item))
                         except Exception:
-                            pass
+                            parsed_tb_list.append({"title": item})
                     elif isinstance(item, dict):
                         parsed_tb_list.append(item)
                 
                 if not parsed_tb_list:
                     parsed_tb_list = api_data.get("_textBooks", [])
+
 
                 for tb in parsed_tb_list:
                     title = tb.get("title") or tb.get("name")

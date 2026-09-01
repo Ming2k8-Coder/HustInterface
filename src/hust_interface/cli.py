@@ -123,10 +123,11 @@ def schedule_cmd(semester: Optional[str]):
     from .crawlers.ehust_crawler import EhustCrawler
     crawler = EhustCrawler()
     
-    with console.status("[bold cyan]Đang tải thời khóa biểu...[/bold cyan]"):
-        res = asyncio.run(crawler.get_full_semester_schedule(semester=semester))
+    console.print("[bold cyan]Đang tải thời khóa biểu...[/bold cyan]")
+    res = asyncio.run(crawler.get_full_semester_schedule(semester=semester))
         
     table = Table(title=f"THỜI KHÓA BIỂU HỌC KỲ {res.semester} ({res.total_courses} môn)", show_header=True, header_style="bold magenta")
+
     table.add_column("STT", justify="center", style="cyan")
     table.add_column("Mã Lớp", style="yellow")
     table.add_column("Mã HP", style="green")

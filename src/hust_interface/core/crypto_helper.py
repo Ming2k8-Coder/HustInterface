@@ -42,9 +42,18 @@ class TimetableCryptoHelper:
         key = hashlib.sha256(cls.KEY_SEED.encode("utf-8")).digest()
         iv = hashlib.md5(cls.IV_SEED.encode("utf-8")).digest()
 
-        raw_b64 = unquote(encrypted_b64_or_url)
-        encrypted_bytes = base64.b64decode(raw_b64)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        decrypted_padded = cipher.decrypt(encrypted_bytes)
-        decrypted_bytes = unpad(decrypted_padded, AES.block_size, style="pkcs7")
-        return json.loads(decrypted_bytes.decode("utf-8"))
+        if not encrypted_b64_or_url or not str(encrypted_b64_or_url).strip():
+            return {}
+
+        try:
+            raw_b64 = unquote(encrypted_b64_or_url)
+            encrypted_bytes = base64.b64decode(raw_b64)
+            if not encrypted_bytes:
+                return {}
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            decrypted_padded = cipher.decrypt(encrypted_bytes)
+            decrypted_bytes = unpad(decrypted_padded, AES.block_size, style="pkcs7")
+            return json.loads(decrypted_bytes.decode("utf-8"))
+        except Exception:
+            return {}
+
