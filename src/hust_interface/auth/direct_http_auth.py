@@ -48,9 +48,19 @@ class DirectHttpAuthenticator:
                     data=post_payload
                 )
 
-                # Capture cookies from client jar
                 cookies_dict = dict(client.client.cookies)
-                logger.debug(f"eHUST login response status: {post_res.status_code}, cookies: {list(cookies_dict.keys())}")
+                
+                # Step 3: Follow redirect to eHUST main portal to capture x-access-token / x-student-portal-token
+                try:
+                    portal_res = await client.get("https://e.hust.edu.vn/students/learn/timetable")
+                    cookies_dict.update(dict(client.client.cookies))
+                    
+                    # Also try visiting student.hust.edu.vn portal root to set domain cookies
+                    await client.get("https://student.hust.edu.vn/api/v1/semesters")
+                    cookies_dict.update(dict(client.client.cookies))
+                except Exception as e:
+                    logger.debug(f"Portal redirect follow error: {e}")
+
 
                 if "JSESSIONID" in cookies_dict or post_res.status_code in [200, 302]:
                     # Extract student_id from email prefix (e.g. minh.nt2611037 -> 202611037, or 20210001 -> 20210001)
@@ -80,6 +90,7 @@ class DirectHttpAuthenticator:
             except Exception as e:
                 logger.error(f"Error during direct eHUST login: {e}")
                 return False
+
 
     async def login_ictsv_http(self, captcha: Optional[str] = "") -> Dict[str, Any]:
         """

@@ -88,17 +88,35 @@ def set_token_cmd(service: str, token: str, student_id: str):
 
 
 @cli.command(name="login-ehust")
-@click.option("--email", "-e", prompt="eHUST Email/Username", default=lambda: settings.HUST_EMAIL or "", help="Email sinh viên HUST")
-@click.option("--password", "-p", prompt="eHUST Password", hide_input=True, default=lambda: settings.HUST_PASSWORD or "", help="Mật khẩu tài khoản")
-def login_ehust_cmd(email: str, password: str):
-    """Direct HTTP login to eHUST via https://e.hust.edu.vn/sso/login (No browser needed)."""
-    console.print(f"[bold cyan]Dang dang nhap truc tiep eHUST (https://e.hust.edu.vn/sso/login) cho {email}...[/bold cyan]")
+@click.option("--cookie", "-c", default=None, help="Chuỗi Cookie eHUST từ Chrome đang mở (x-access-token, x-student-portal-token)")
+@click.option("--email", "-e", default=lambda: settings.HUST_EMAIL or "", help="Email sinh viên HUST")
+@click.option("--password", "-p", default=lambda: settings.HUST_PASSWORD or "", help="Mật khẩu tài khoản")
+def login_ehust_cmd(cookie: Optional[str], email: str, password: str):
+    """Đăng nhập eHUST hoặc cập nhật Cookie eHUST (Không mở browser)."""
+    if cookie:
+        ManualAuthenticator.set_ehust_cookie(cookie)
+        console.print("[bold green]✓ Đã cập nhật Cookie eHUST thành công vào session cache![/bold green]")
+        return
+
+    if not email or not password:
+        console.print("[bold cyan]=== HƯỚNG DẪN CẬP NHẬT COOKIE EHUST TỪ TRÌNH DUYỆT ĐANG MỞ ===[/bold cyan]")
+        console.print("1. Mở tab [bold yellow]https://e.hust.edu.vn[/bold yellow] trên Chrome đã đăng nhập.")
+        console.print("2. Bấm [bold green]F12[/bold green] -> Chuyển sang tab [bold green]Console[/bold green].")
+        console.print("3. Dán lệnh sau và Enter: [bold white on black] copy(document.cookie) [/bold white on black]")
+        console.print("4. Cookie đã được sao chép. Dán chuỗi cookie vào bên dưới:")
+        cookie_input = click.prompt("Nhập Cookie eHUST")
+        ManualAuthenticator.set_ehust_cookie(cookie_input)
+        console.print("[bold green]✓ Đã cập nhật Cookie eHUST thành công vào session cache![/bold green]")
+        return
+
+    console.print(f"[bold cyan]Đang đăng nhập trực tiếp eHUST cho {email}...[/bold cyan]")
     auth = DirectHttpAuthenticator(email=email, password=password)
     success = asyncio.run(auth.login_ehust_http())
     if success:
-        console.print("[bold green]✓ Dang nhap eHUST thanh cong! Session da duoc luu.[/bold green]")
+        console.print("[bold green]✓ Đăng nhập eHUST thành công! Session đã được lưu.[/bold green]")
     else:
-        console.print("[bold red]✗ Dang nhap eHUST that bai. Vui long kiem tra email/mat khau.[/bold red]")
+        console.print("[bold red]✗ Đăng nhập thất bại. Vui lòng kiểm tra email/mật khẩu hoặc dán Cookie qua: uv run hust-mcp login-ehust[/bold red]")
+
 
 
 @cli.command(name="login-ctsv")
@@ -126,6 +144,14 @@ def schedule_cmd(semester: Optional[str]):
     console.print("[bold cyan]Đang tải thời khóa biểu...[/bold cyan]")
     res = asyncio.run(crawler.get_full_semester_schedule(semester=semester))
         
+    if not res.classes:
+        console.print("[bold yellow]⚠ Chưa tải được thời khóa biểu (Token eHUST/Portal đã hết hạn hoặc chưa đồng bộ).[/bold yellow]")
+        console.print("[bold cyan]👉 Để cập nhật Token trong 5 giây:[/bold cyan]")
+        console.print("1. Mở [bold yellow]https://e.hust.edu.vn[/bold yellow] trên Chrome đã đăng nhập.")
+        console.print("2. Bấm [bold green]F12[/bold green] -> Tab [bold green]Console[/bold green] -> Dán: [bold white on black] copy(document.cookie) [/bold white on black]")
+        console.print("3. Chạy lệnh: [bold green]uv run hust-mcp login-ehust[/bold green] và dán vào.")
+        return
+
     table = Table(title=f"THỜI KHÓA BIỂU HỌC KỲ {res.semester} ({res.total_courses} môn)", show_header=True, header_style="bold magenta")
 
     table.add_column("STT", justify="center", style="cyan")
@@ -148,6 +174,7 @@ def schedule_cmd(semester: Optional[str]):
         )
 
     console.print(table)
+
 
 
 
